@@ -620,6 +620,63 @@ Context::findValue(absl::string_view name, Protobuf::Arena* arena, bool last) co
 WasmResult Context::getProperty(std::string_view path, std::string* result) {
   using google::api::expr::runtime::CelValue;
 
+  // Special handling for custom Higress route properties
+  // Support: ["route", "all_llm_clusters"]
+  // The path is a NUL ("\0") separated string in Envoy WASM ABI.
+  // We check for both two-segment form and single flattened form for compatibility.
+  if (path == std::string_view("route\0all_llm_clusters", sizeof("route\0all_llm_clusters") - 1) ||
+      path == std::string_view("route_all_llm_clusters")) {
+    // Build clusters JSON from the current matched route only
+    if (!decoder_callbacks_) {
+      return WasmResult::BadArgument;
+    }
+    auto route = decoder_callbacks_->route();
+    if (!route || !route->routeEntry()) {
+      return WasmResult::NotFound;
+    }
+
+    nlohmann::json clusters = nlohmann::json::array();
+    const auto& entry = route->routeEntry();
+
+    auto append_cluster = [&](const std::string& cluster_name, int weight) {
+      auto tlc = this->clusterManager().getThreadLocalCluster(cluster_name);
+      if (!tlc) {
+        return; // skip if cluster not warmed yet
+      }
+      nlohmann::json ci;
+      ci["cluster_name"] = cluster_name;
+      ci["weight"] = weight;
+
+      nlohmann::json endpoints = nlohmann::json::array();
+      for (const auto& host_set : tlc->prioritySet().hostSetsPerPriority()) {
+        for (const auto& host : host_set->hosts()) {
+          nlohmann::json ep;
+          const auto& addr = host->address();
+          if (addr->ip()) {
+            ep["ip"] = addr->ip()->addressAsString();
+            ep["port"] = addr->ip()->port();
+          }
+          ep["health_status"] = convertHealthStatusToString(host->coarseHealth());
+          endpoints.push_back(ep);
+        }
+      }
+      ci["endpoints"] = endpoints;
+      clusters.push_back(ci);
+    };
+
+    const auto& weighted = entry->weightedClusters();
+    if (!weighted.empty()) {
+      for (const auto& wc : weighted) {
+        append_cluster(wc->clusterName(), wc->clusterWeight());
+      }
+    } else {
+      append_cluster(entry->clusterName(), 100);
+    }
+
+    *result = clusters.dump();
+    return WasmResult::Ok;
+  }
+
   bool first = true;
   CelValue value;
   Protobuf::Arena arena;
