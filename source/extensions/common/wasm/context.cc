@@ -620,27 +620,42 @@ Context::findValue(absl::string_view name, Protobuf::Arena* arena, bool last) co
 WasmResult Context::getProperty(std::string_view path, std::string* result) {
   using google::api::expr::runtime::CelValue;
 
+  ENVOY_LOG(debug, "[wasm.getProperty] enter getProperty, path={}", path);
+
   // Special handling for custom Higress route properties
   // Support: ["route", "all_llm_clusters"]
   // The path is a NUL ("\0") separated string in Envoy WASM ABI.
   // We check for both two-segment form and single flattened form for compatibility.
   if (path == std::string_view("route\0all_llm_clusters", sizeof("route\0all_llm_clusters") - 1) ||
       path == std::string_view("route_all_llm_clusters")) {
+    const bool matched_two_segment =
+        path == std::string_view("route\0all_llm_clusters", sizeof("route\0all_llm_clusters") - 1);
+    ENVOY_LOG(debug,
+              "[wasm.getProperty] matched all_llm_clusters, form={}, path_size={}, access_log_phase={}, "
+              "decoder_cb={}, encoder_cb={}",
+              (matched_two_segment ? "route\0all_llm_clusters" : "route_all_llm_clusters"), path.size(),
+              access_log_phase_, decoder_callbacks_ != nullptr, encoder_callbacks_ != nullptr);
     // Build clusters JSON from the current matched route only
     if (!decoder_callbacks_) {
+      ENVOY_LOG(warn, "[wasm.getProperty] all_llm_clusters: decoder_callbacks_ is null, return BadArgument");
       return WasmResult::BadArgument;
     }
     auto route = decoder_callbacks_->route();
+    ENVOY_LOG(debug, "[wasm.getProperty] all_llm_clusters: has_route={}, has_entry={}", route != nullptr,
+              (route && route->routeEntry()) != nullptr);
     if (!route || !route->routeEntry()) {
+      ENVOY_LOG(debug, "[wasm.getProperty] all_llm_clusters: route or routeEntry missing, return NotFound");
       return WasmResult::NotFound;
     }
 
     nlohmann::json clusters = nlohmann::json::array();
     const auto& entry = route->routeEntry();
 
+    size_t appended_clusters = 0;
     auto append_cluster = [&](const std::string& cluster_name, int weight) {
       auto tlc = this->clusterManager().getThreadLocalCluster(cluster_name);
       if (!tlc) {
+        ENVOY_LOG(debug, "[wasm.getProperty] all_llm_clusters: skip unwarmed cluster '{}'", cluster_name);
         return; // skip if cluster not warmed yet
       }
       nlohmann::json ci;
@@ -648,6 +663,7 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
       ci["weight"] = weight;
 
       nlohmann::json endpoints = nlohmann::json::array();
+      size_t endpoint_count = 0;
       for (const auto& host_set : tlc->prioritySet().hostSetsPerPriority()) {
         for (const auto& host : host_set->hosts()) {
           nlohmann::json ep;
@@ -658,10 +674,15 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
           }
           ep["health_status"] = convertHealthStatusToString(host->coarseHealth());
           endpoints.push_back(ep);
+          ++endpoint_count;
         }
       }
       ci["endpoints"] = endpoints;
       clusters.push_back(ci);
+      ++appended_clusters;
+      ENVOY_LOG(debug,
+                "[wasm.getProperty] all_llm_clusters: appended cluster '{}' (weight={}), endpoints={}",
+                cluster_name, weight, endpoint_count);
     };
 
     const auto& weighted = entry->weightedClusters();
@@ -674,6 +695,9 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
     }
 
     *result = clusters.dump();
+    ENVOY_LOG(debug,
+              "[wasm.getProperty] all_llm_clusters: done. appended_clusters={}, json_size={} bytes",
+              appended_clusters, result->size());
     return WasmResult::Ok;
   }
 
