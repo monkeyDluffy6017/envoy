@@ -670,14 +670,14 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
     }
     auto route = decoder_callbacks_->route();
     ENVOY_LOG(debug, "[wasm.getProperty] all_llm_clusters: has_route={}, has_entry={}", route != nullptr,
-              (route && route->routeEntry()) != nullptr);
+              (route && (route->routeEntry() != nullptr)));
     if (!route || !route->routeEntry()) {
       ENVOY_LOG(debug, "[wasm.getProperty] all_llm_clusters: route or routeEntry missing, return NotFound");
       return WasmResult::NotFound;
     }
 
     nlohmann::json clusters = nlohmann::json::array();
-    const auto& entry = route->routeEntry();
+    const auto* entry = route->routeEntry();
 
     size_t appended_clusters = 0;
     auto append_cluster = [&](const std::string& cluster_name, int weight) {
@@ -700,7 +700,18 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
             ep["ip"] = addr->ip()->addressAsString();
             ep["port"] = addr->ip()->port();
           }
-          ep["health_status"] = convertHealthStatusToString(host->coarseHealth());
+          // Map coarse health enum to string without relying on helper removed in this Envoy version
+          switch (host->coarseHealth()) {
+          case Upstream::Host::Health::Healthy:
+            ep["health_status"] = "HEALTHY";
+            break;
+          case Upstream::Host::Health::Degraded:
+            ep["health_status"] = "DEGRADED";
+            break;
+          case Upstream::Host::Health::Unhealthy:
+            ep["health_status"] = "UNHEALTHY";
+            break;
+          }
           endpoints.push_back(ep);
           ++endpoint_count;
         }
@@ -713,14 +724,9 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
                 cluster_name, weight, endpoint_count);
     };
 
-    const auto& weighted = entry->weightedClusters();
-    if (!weighted.empty()) {
-      for (const auto& wc : weighted) {
-        append_cluster(wc->clusterName(), wc->clusterWeight());
-      }
-    } else {
-      append_cluster(entry->clusterName(), 100);
-    }
+    // Some Envoy versions don't expose weightedClusters() on RouteEntry public interface.
+    // Fallback to the resolved cluster name from the matched route.
+    append_cluster(entry->clusterName(), 100);
 
     *result = clusters.dump();
     ENVOY_LOG(debug,
