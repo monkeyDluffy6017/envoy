@@ -623,13 +623,41 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
   ENVOY_LOG(debug, "[wasm.getProperty] enter getProperty, path={}", path);
 
   // Special handling for custom Higress route properties
-  // Support: ["route", "all_llm_clusters"]
+  // Support: ["route", "all_llm_clusters"], optional trailing NUL is accepted
   // The path is a NUL ("\0") separated string in Envoy WASM ABI.
-  // We check for both two-segment form and single flattened form for compatibility.
-  if (path == std::string_view("route\0all_llm_clusters", sizeof("route\0all_llm_clusters") - 1) ||
-      path == std::string_view("route_all_llm_clusters")) {
+  // Also support a single flattened form: "route_all_llm_clusters" for compatibility.
+  bool match_all_llm = false;
+  bool matched_two_segment = false;
+  if (path == std::string_view("route_all_llm_clusters")) {
+    match_all_llm = true;
+    matched_two_segment = false;
+  } else {
+    // Tokenize by NUL, ignore a final empty token caused by trailing NUL (SDK differences)
+    absl::string_view p = toAbslStringView(path);
+    std::array<absl::string_view, 3> segs; // expect <= 2 meaningful segments
+    size_t segc = 0;
+    size_t start = 0;
+    while (start <= p.size() && segc < segs.size()) {
+      size_t end = p.find('\0', start);
+      if (end == absl::string_view::npos) {
+        end = p.size();
+      }
+      absl::string_view part = p.substr(start, end - start);
+      start = end + 1;
+      // skip trailing empty token
+      if (part.empty() && start >= p.size()) {
+        break;
+      }
+      segs[segc++] = part;
+    }
+    if (segc == 2 && segs[0] == "route" && segs[1] == "all_llm_clusters") {
+      match_all_llm = true;
+      matched_two_segment = true;
+    }
+  }
+  if (match_all_llm) {
     const bool matched_two_segment =
-        path == std::string_view("route\0all_llm_clusters", sizeof("route\0all_llm_clusters") - 1);
+        matched_two_segment;
     ENVOY_LOG(debug,
               "[wasm.getProperty] matched all_llm_clusters, form={}, path_size={}, access_log_phase={}, "
               "decoder_cb={}, encoder_cb={}",
