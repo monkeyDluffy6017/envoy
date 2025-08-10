@@ -1,6 +1,7 @@
 #include "source/extensions/common/wasm/context.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstring>
 #include <ctime>
@@ -17,6 +18,7 @@
 #include "envoy/network/filter.h"
 #include "envoy/stats/sink.h"
 #include "envoy/thread_local/thread_local.h"
+#include "envoy/upstream/upstream.h"
 
 #include "source/common/buffer/buffer_impl.h"
 #include "source/common/common/assert.h"
@@ -656,8 +658,6 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
     }
   }
   if (match_all_llm) {
-    const bool matched_two_segment =
-        matched_two_segment;
     ENVOY_LOG(debug,
               "[wasm.getProperty] matched all_llm_clusters, form={}, path_size={}, access_log_phase={}, "
               "decoder_cb={}, encoder_cb={}",
