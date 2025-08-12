@@ -5,6 +5,8 @@
 #include <functional>
 #include <list>
 #include <map>
+#include <utility>
+#include <vector>
 #include <memory>
 #include <string>
 
@@ -1114,6 +1116,11 @@ public:
    * @return EarlyDataPolicy& the configured early data option.
    */
   virtual const EarlyDataPolicy& earlyDataPolicy() const PURE;
+
+    // HIGRESS: Expose weighted clusters (cluster name + weight) for the matched route.
+    // Default returns nullopt if not supported by the implementation.
+    virtual absl::optional<std::vector<std::pair<std::string, uint32_t>>>
+    weightedClusterNamesAndWeights() const { return absl::nullopt; }
 };
 
 /**

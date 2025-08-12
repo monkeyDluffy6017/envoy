@@ -30,7 +30,6 @@
 #include "source/common/http/message_impl.h"
 #include "source/common/http/utility.h"
 #include "source/common/tracing/http_tracer_impl.h"
-#include "source/common/router/config_impl.h"
 #include "source/extensions/common/wasm/plugin.h"
 #include "source/extensions/common/wasm/wasm.h"
 #include "source/extensions/filters/common/expr/context.h"
@@ -721,15 +720,14 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
       clusters.push_back(ci);
       ++appended_clusters;
       ENVOY_LOG(debug,
-                "[wasm.getProperty] all_llm_clusters: appended cluster '{}' (weight={}), endpoints={}",
-                cluster_name, weight, endpoint_count);
+                "[wasm.getProperty] all_llm_clusters: appended cluster '{}' endpoints={}",
+                cluster_name, endpoint_count);
     };
 
-    // Prefer weighted clusters when available via HTTP RouteEntryImplBase accessor.
+    // Prefer weighted clusters when available via public RouteEntry accessor.
     bool used_weighted = false;
-    if (const auto* http_impl =
-            dynamic_cast<const Envoy::Router::RouteEntryImplBase*>(entry)) {
-      auto weighted = http_impl->getWeightedClusterNamesAndWeights();
+    if (entry) {
+      auto weighted = entry->weightedClusterNamesAndWeights();
       if (weighted && !weighted->empty()) {
         for (const auto& p : *weighted) {
           append_cluster(p.first, static_cast<int>(p.second));

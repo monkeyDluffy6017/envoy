@@ -883,6 +883,11 @@ public:
     auto* config = per_filter_configs_.get(name);
     return config ? config : vhost_->mostSpecificPerFilterConfig(name);
   }
+  // Public interface override (declared in envoy/router/router.h)
+  absl::optional<std::vector<std::pair<std::string, uint32_t>>>
+  weightedClusterNamesAndWeights() const override {
+    return getWeightedClusterNamesAndWeights();
+  }
   // Expose weighted clusters for read-only diagnostic or integration use.
   // Returns nullopt if this route is not configured with weighted_clusters.
   absl::optional<std::vector<std::pair<std::string, uint32_t>>>
@@ -1025,6 +1030,10 @@ public:
     const RouteSpecificFilterConfig*
     mostSpecificPerFilterConfig(const std::string& name) const override {
       return parent_->mostSpecificPerFilterConfig(name);
+    }
+    absl::optional<std::vector<std::pair<std::string, uint32_t>>>
+    weightedClusterNamesAndWeights() const override {
+      return parent_->weightedClusterNamesAndWeights();
     }
     void traversePerFilterConfig(
         const std::string& filter_name,
