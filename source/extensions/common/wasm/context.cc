@@ -628,49 +628,14 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
   // Support: ["route", "all_llm_clusters"], optional trailing NUL is accepted
   // The path is a NUL ("\0") separated string in Envoy WASM ABI.
   // Also support a single flattened form: "route_all_llm_clusters" for compatibility.
-  bool match_all_llm = false;
-  bool matched_two_segment = false;
-  if (path == std::string_view("route_all_llm_clusters")) {
-    match_all_llm = true;
-    matched_two_segment = false;
-  } else {
-    // Tokenize by NUL, ignore a final empty token caused by trailing NUL (SDK differences)
-    absl::string_view p = toAbslStringView(path);
-    std::array<absl::string_view, 3> segs; // expect <= 2 meaningful segments
-    size_t segc = 0;
-    size_t start = 0;
-    while (start <= p.size() && segc < segs.size()) {
-      size_t end = p.find('\0', start);
-      if (end == absl::string_view::npos) {
-        end = p.size();
-      }
-      absl::string_view part = p.substr(start, end - start);
-      start = end + 1;
-      // skip trailing empty token
-      if (part.empty() && start >= p.size()) {
-        break;
-      }
-      segs[segc++] = part;
-    }
-    if (segc == 2 && segs[0] == "route" && segs[1] == "all_llm_clusters") {
-      match_all_llm = true;
-      matched_two_segment = true;
-    }
-  }
-  if (match_all_llm) {
-    ENVOY_LOG(debug,
-              "[wasm.getProperty] matched all_llm_clusters, form={}, path_size={}, access_log_phase={}, "
-              "decoder_cb={}, encoder_cb={}",
-              (matched_two_segment ? "route\0all_llm_clusters" : "route_all_llm_clusters"), path.size(),
-              access_log_phase_, decoder_callbacks_ != nullptr, encoder_callbacks_ != nullptr);
+  if (path == std::string_view("route\0all_llm_clusters", sizeof("route\0all_llm_clusters") - 1) ||
+      path == std::string_view("route_all_llm_clusters")) {
     // Build clusters JSON from the current matched route only
     if (!decoder_callbacks_) {
       ENVOY_LOG(warn, "[wasm.getProperty] all_llm_clusters: decoder_callbacks_ is null, return BadArgument");
       return WasmResult::BadArgument;
     }
     auto route = decoder_callbacks_->route();
-    ENVOY_LOG(debug, "[wasm.getProperty] all_llm_clusters: has_route={}, has_entry={}", route != nullptr,
-              (route && (route->routeEntry() != nullptr)));
     if (!route || !route->routeEntry()) {
       ENVOY_LOG(debug, "[wasm.getProperty] all_llm_clusters: route or routeEntry missing, return NotFound");
       return WasmResult::NotFound;
@@ -720,8 +685,8 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
       clusters.push_back(ci);
       ++appended_clusters;
       ENVOY_LOG(debug,
-                "[wasm.getProperty] all_llm_clusters: appended cluster '{}' endpoints={}",
-                cluster_name, endpoint_count);
+                "[wasm.getProperty] all_llm_clusters: appended cluster '{}' (weight={}), endpoints={}",
+                cluster_name, weight, endpoint_count);
     };
 
     // Prefer weighted clusters when available via public RouteEntry accessor.
@@ -733,9 +698,6 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
           append_cluster(p.first, static_cast<int>(p.second));
         }
         used_weighted = true;
-        ENVOY_LOG(debug,
-                  "[wasm.getProperty] all_llm_clusters: used weightedClusters, count={}",
-                  weighted->size());
       }
     }
     if (!used_weighted) {
@@ -744,9 +706,6 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
     }
 
     *result = clusters.dump();
-    ENVOY_LOG(debug,
-              "[wasm.getProperty] all_llm_clusters: done. appended_clusters={}, json_size={} bytes",
-              appended_clusters, result->size());
     return WasmResult::Ok;
   }
 
