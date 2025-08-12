@@ -883,6 +883,10 @@ public:
     auto* config = per_filter_configs_.get(name);
     return config ? config : vhost_->mostSpecificPerFilterConfig(name);
   }
+  // Expose weighted clusters for read-only diagnostic or integration use.
+  // Returns nullopt if this route is not configured with weighted_clusters.
+  absl::optional<std::vector<std::pair<std::string, uint32_t>>>
+  getWeightedClusterNamesAndWeights() const;
   void traversePerFilterConfig(
       const std::string& filter_name,
       std::function<void(const Router::RouteSpecificFilterConfig&)> cb) const override;

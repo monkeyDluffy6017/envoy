@@ -30,6 +30,7 @@
 #include "source/common/http/message_impl.h"
 #include "source/common/http/utility.h"
 #include "source/common/tracing/http_tracer_impl.h"
+#include "source/common/router/config_impl.h"
 #include "source/extensions/common/wasm/plugin.h"
 #include "source/extensions/common/wasm/wasm.h"
 #include "source/extensions/filters/common/expr/context.h"
@@ -724,9 +725,25 @@ WasmResult Context::getProperty(std::string_view path, std::string* result) {
                 cluster_name, weight, endpoint_count);
     };
 
-    // Some Envoy versions don't expose weightedClusters() on RouteEntry public interface.
-    // Fallback to the resolved cluster name from the matched route.
-    append_cluster(entry->clusterName(), 100);
+    // Prefer weighted clusters when available via HTTP RouteEntryImplBase accessor.
+    bool used_weighted = false;
+    if (const auto* http_impl =
+            dynamic_cast<const Envoy::Router::RouteEntryImplBase*>(entry)) {
+      auto weighted = http_impl->getWeightedClusterNamesAndWeights();
+      if (weighted && !weighted->empty()) {
+        for (const auto& p : *weighted) {
+          append_cluster(p.first, static_cast<int>(p.second));
+        }
+        used_weighted = true;
+        ENVOY_LOG(debug,
+                  "[wasm.getProperty] all_llm_clusters: used weightedClusters, count={}",
+                  weighted->size());
+      }
+    }
+    if (!used_weighted) {
+      // Fallback to the resolved cluster name from the matched route.
+      append_cluster(entry->clusterName(), 100);
+    }
 
     *result = clusters.dump();
     ENVOY_LOG(debug,

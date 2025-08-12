@@ -747,6 +747,20 @@ RouteEntryImplBase::RouteEntryImplBase(const CommonVirtualHostSharedPtr& vhost,
   }
 }
 
+absl::optional<std::vector<std::pair<std::string, uint32_t>>>
+RouteEntryImplBase::getWeightedClusterNamesAndWeights() const {
+  if (!weighted_clusters_config_) {
+    return absl::nullopt;
+  }
+  std::vector<std::pair<std::string, uint32_t>> result;
+  result.reserve(weighted_clusters_config_->weighted_clusters_.size());
+  for (const auto& wc : weighted_clusters_config_->weighted_clusters_) {
+    // clusterWeight() returns uint64_t but is bounded by uint32 max when built
+    result.emplace_back(wc->clusterName(), static_cast<uint32_t>(wc->clusterWeight()));
+  }
+  return result;
+}
+
 bool RouteEntryImplBase::evaluateRuntimeMatch(const uint64_t random_value) const {
   return runtime_ == nullptr
              ? true
